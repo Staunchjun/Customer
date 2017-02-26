@@ -73,9 +73,27 @@ def GenerateTimeF(eachShop):
     newdata = newdata.join(eachShop)
     newdata.drop(['shop_id'],axis=1,inplace=True)
     newdata['difference_two_day'] = newdata['yesterday'] - newdata['TwoDayAgo_col']
+    newdata['meanValue14'] =0
+    newdata['meanValue7'] =0
+
+    for x in range(14,len(newdata)-15):
+        eachline = newdata.ix[x:x]
+        fourteen = newdata.ix[x-14:x-1]
+        meanValue14 = fourteen['TwoDayAgo_col'].mean()
+        meanValue7 = fourteen.ix[len(fourteen)-7+x-14:len(fourteen)-1+x-14]
+        meanValue7 = meanValue7['TwoDayAgo_col'].mean()
+        eachline['meanValue14'] = meanValue14
+        eachline['meanValue7'] = meanValue7
+        newdata.update(eachline)
     newdata.drop(len(newdata)-1,inplace=True)
     newdata.drop(len(newdata)-1,inplace=True)
-    basePredict = newdata.ix[len(newdata)-14:len(newdata)-1]
+    for x in range(0,14):
+        newdata.drop(x,inplace=True)
+
+    newdata.reset_index(inplace=True)
+    newdata.drop(['index'],axis=1,inplace=True)
+
+    basePredict = newdata.ix[len(newdata)-14-13:len(newdata)-1]
     for x in range(0,14):
         newdata.drop(len(newdata)-1,inplace=True)
     return basePredict,newdata
@@ -85,7 +103,7 @@ def SplitData(PredictData,newdata):
     train_data = newdata.ix[0:int(0.9*len(newdata))]
     test_data = newdata.ix[int(0.9*len(newdata)):len(newdata)-1]
     return PredictData,train_data,test_data
-def FittingModel(train_data,test_data,ToDrop):
+def FittingModel(train_data,test_data,ToDrop,shop_id):
     train_xgb = xgb.DMatrix(data=train_data.drop(ToDrop,axis=1)
                             ,label=train_data['Num'])
     valid_xgb = xgb.DMatrix(data=test_data.drop(ToDrop,axis=1)
@@ -116,32 +134,48 @@ def FittingModel(train_data,test_data,ToDrop):
     print ('get info from model')
     print (model.best_score, model.best_iteration,model.best_ntree_limit)
     return model
-
-
 p_result = []
 Customer_Flow = LoadData()
 all_data = GenerateAllData(Customer_Flow)
-for shop_id, eachShop in all_data.groupby(['shop_id']):
 
+for shop_id, eachShop in all_data.groupby(['shop_id']):
     warnings.filterwarnings("ignore")
     eachShop = TimeFeat(eachShop)
+
     PredictData, newdata = GenerateTimeF(eachShop)
+
     PredictData,train_data, test_data = SplitData(PredictData,newdata)
     ToDrop = ['Num', 'data']
     print "fitting data on model....."
-    model =  FittingModel(train_data,test_data,ToDrop)
+    model =  FittingModel(train_data,test_data,ToDrop,shop_id)
     result = []
     dataLen = len(PredictData)
+
     print "predicting...."
-    for x in range(0, dataLen):
+    for x in range(13, dataLen):
         first = PredictData.ix[x:x]
-        if x == 1:
+        if x == 14:
             first['yesterday'] = firstNum
             Next_TwoDayAgo_col = firstNum
-        if x >= 2:
+            fourteen = PredictData.ix[x-14:x-1]
+            meanValue14 = fourteen['TwoDayAgo_col'].mean()
+            meanValue7 = fourteen.ix[len(fourteen)-7+x-14:len(fourteen)-1+x-14]
+            meanValue7 = meanValue7['TwoDayAgo_col'].mean()
+            first['meanValue14'] = meanValue14
+            first['meanValue7'] = meanValue7
+            PredictData.update(first)
+        if x >= 15:
             first['yesterday'] = firstNum
             first['TwoDayAgo_col'] = Next_TwoDayAgo_col
             Next_TwoDayAgo_col = firstNum
+            fourteen = PredictData.ix[x-14:x-1]
+            meanValue14 = fourteen['TwoDayAgo_col'].mean()
+            meanValue7 = fourteen.ix[len(fourteen)-7+x-14:len(fourteen)-1+x-14]
+            meanValue7 = meanValue7['TwoDayAgo_col'].mean()
+            first['meanValue14'] = meanValue14
+            first['meanValue7'] = meanValue7
+            PredictData.update(first)
+
         predict_xgb = xgb.DMatrix(data=first.drop(ToDrop, axis=1))
         firstNum = model.predict(predict_xgb, ntree_limit=model.best_ntree_limit)
         result.append(firstNum)
@@ -154,4 +188,4 @@ for shop_id, eachShop in all_data.groupby(['shop_id']):
     p_result.append(each_line)
     print " the task  of ",shop_id,"is finished!!"
 p_result = abs(pd.DataFrame(p_result).astype(int))
-p_result.to_csv('LR.csv',header=False,index=False,encoding='utf-8')
+p_result.to_csv('LR_modify.csv', header=False, index=False, encoding='utf-8')
